@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+PyMuPDF
+pydantic
+python-dotenv
+Pillow
+opencv-python-headless
+
+jiwer==4.0.0

@@ -1,0 +1,3 @@
+# Este directorio contiene c?digo y secretos; usar artisan serve o un VirtualHost
+# cuyo DocumentRoot sea exclusivamente laravel/public.
+Require all denied

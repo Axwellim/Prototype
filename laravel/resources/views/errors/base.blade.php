@@ -1,0 +1,3 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>@yield('code') · GAD Imantag</title><link rel="stylesheet" href="{{ asset('vendor/bootstrap/bootstrap.min.css') }}"></head>
+<body class="bg-light"><main class="container py-5"><div class="card p-4 mx-auto" style="max-width:550px"><p class="text-secondary">GAD IMANTAG · @yield('code')</p><h1 class="h4">@yield('message')</h1><p>Si el problema continúa, comunícate con la administración local.</p><a href="{{ url('/documentos') }}" class="btn btn-primary">Volver al módulo</a></div></main></body></html>
