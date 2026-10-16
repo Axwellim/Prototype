@@ -79,7 +79,7 @@ class RevisionDocumentoTest extends TestCase
     {
         $doc = $this->documento('pdf', '</textarea><script>alert(1)</script>');
         $response = $this->actingAs($this->operador())->get('/documentos/'.$doc->uuid.'/revision?pagina=2')->assertOk();
-        $response->assertSee('Página 2 de 2')->assertSee('id="reference-text"', false)->assertSee('readonly', false);
+        $response->assertSee('La referencia editable corresponde a la página 2.')->assertSee('id="reference-text"', false)->assertSee('readonly', false);
         $response->assertDontSee('</textarea><script>alert(1)</script>', false)->assertSee('&lt;script&gt;', false);
         $this->get('/documentos/'.$doc->uuid.'/revision?pagina=3')->assertNotFound();
         $this->get('/documentos/'.$doc->uuid.'/revision?pagina=abc')->assertNotFound();

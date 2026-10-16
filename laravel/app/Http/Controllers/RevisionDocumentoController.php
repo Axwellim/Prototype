@@ -15,15 +15,21 @@ class RevisionDocumentoController extends Controller
         if ($documento->estado_procesamiento !== 'completado') {
             return response()->view('documentos.sin-resultados', compact('documento'))->header('Cache-Control', 'private, no-store');
         }
+        if ($documento->tipo_registro === 'invitacion') {
+            return response()->view('documentos.invitacion', compact('documento'))->header('Cache-Control', 'private, no-store');
+        }
+        $origenes = $this->origenes($documento);
         $numero = filter_var($request->query('pagina', 1), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 1000]]);
         abort_if($numero === false || $numero > $documento->numero_paginas, 404);
+        $origen = collect($origenes)->first(fn ($item) => $numero >= $item['inicio'] && $numero <= $item['fin']);
         $pagina = $documento->extracciones()->where('numero_pagina', $numero)->firstOrFail();
         $referencia = $documento->evaluaciones()->where('numero_pagina', $numero)->with('usuario')->latest('id')->first();
         $metricas = $referencia?->usuario_id && $referencia?->metricas && $referencia?->hash_extraccion === CalidadDocumentoController::huella($pagina) ? $referencia->metricas : null;
         $historial = $documento->evaluaciones()->where('numero_pagina', $numero)->with('usuario')->latest('id')->paginate(5, ['*'], 'historial')->withQueryString();
-        $reviewConfig = ['originalUrl' => route('documentos.original', $documento), 'tipo' => $documento->tipo_archivo, 'pagina' => $numero, 'uuid' => $documento->uuid, 'pdfjsUrl' => asset('vendor/pdfjs/build/pdf.mjs'), 'workerUrl' => asset('vendor/pdfjs/build/pdf.worker.mjs'), 'fontUrl' => asset('vendor/pdfjs/standard_fonts').'/', 'cmapUrl' => asset('vendor/pdfjs/cmaps').'/', 'wasmUrl' => asset('vendor/pdfjs/wasm').'/', 'variantes' => $pagina->variantes_ocr ?? [], 'baseline' => ['texto' => $referencia?->texto_referencia ?? '', 'observaciones' => $referencia?->observaciones ?? '']];
+        $textos = $documento->extracciones()->orderBy('numero_pagina')->get(['numero_pagina', 'texto_extraido'])->map(fn ($item) => ['numero' => $item->numero_pagina, 'texto' => $item->texto_extraido])->all();
+        $reviewConfig = ['textos' => $textos,'conjunto' => $documento->tipo_archivo === 'zip', 'reviewUrl' => route('documentos.revision', $documento), 'origenes' => $origenes, 'originalUrl' => route($documento->tipo_archivo === 'zip' ? 'documentos.pdf' : 'documentos.original', $documento), 'tipo' => $documento->tipo_archivo === 'zip' ? 'pdf' : $documento->tipo_archivo, 'pagina' => $numero, 'uuid' => $documento->uuid, 'pdfjsUrl' => asset('vendor/pdfjs/build/pdf.mjs'), 'workerUrl' => asset('vendor/pdfjs/build/pdf.worker.mjs'), 'fontUrl' => asset('vendor/pdfjs/standard_fonts').'/', 'cmapUrl' => asset('vendor/pdfjs/cmaps').'/', 'wasmUrl' => asset('vendor/pdfjs/wasm').'/', 'variantes' => $pagina->variantes_ocr ?? [], 'baseline' => ['texto' => $referencia?->texto_referencia ?? '', 'observaciones' => $referencia?->observaciones ?? '']];
 
-        return response()->view('documentos.revision', compact('documento', 'pagina', 'numero', 'referencia', 'historial', 'reviewConfig', 'metricas'))
+        return response()->view('documentos.revision', compact('documento', 'pagina', 'numero', 'referencia', 'historial', 'reviewConfig', 'metricas', 'origen', 'textos'))
             ->header('Cache-Control', 'private, no-store')->header('X-Content-Type-Options', 'nosniff');
     }
 
@@ -31,13 +37,13 @@ class RevisionDocumentoController extends Controller
     {
         abort_unless($documento->estado_procesamiento === 'completado', 409, 'El documento aún no está disponible para revisión.');
         $relative = 'originales/'.$documento->uuid.'.'.$documento->tipo_archivo;
-        abort_unless(Str::isUuid($documento->uuid) && in_array($documento->tipo_archivo, ['pdf', 'png', 'jpg'], true) && $documento->ruta_privada === $relative, 404);
+        abort_unless(Str::isUuid($documento->uuid) && in_array($documento->tipo_archivo, ['pdf', 'png', 'jpg', 'zip'], true) && $documento->ruta_privada === $relative, 404);
         $disk = Storage::disk('documentos');
         $path = realpath($disk->path($relative));
         $root = realpath($disk->path(''));
         abort_unless($path && $root && str_starts_with($path, rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR) && is_file($path), 404);
         abort_unless(filesize($path) === $documento->tamano_bytes && hash_equals($documento->hash_sha256, hash_file('sha256', $path)), 409, 'El original no coincide con el archivo registrado.');
-        $mime = ['pdf' => 'application/pdf', 'png' => 'image/png', 'jpg' => 'image/jpeg'][$documento->tipo_archivo];
+        $mime = ['pdf' => 'application/pdf', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'zip' => 'application/zip'][$documento->tipo_archivo];
 
         return response()->file($path, ['Content-Type' => $mime, 'Cache-Control' => 'private, no-store',
             'X-Content-Type-Options' => 'nosniff', 'Content-Security-Policy' => "sandbox; default-src 'none'", 'X-Frame-Options' => 'SAMEORIGIN']);
@@ -46,27 +52,34 @@ class RevisionDocumentoController extends Controller
     public function texto(DocumentoPrueba $documento)
     {
         abort_unless($documento->estado_procesamiento === 'completado', 409, 'La extracción todavía no está completada.');
+        abort_if($documento->tipo_registro === 'invitacion', 409, 'Esta invitación se guardó sin transcripción.');
         $paginas = $documento->extracciones()->orderBy('numero_pagina')->get();
 
         return response()->view('documentos.texto', compact('documento', 'paginas'))->header('Cache-Control', 'private, no-store');
     }
 
-    public function pdf(DocumentoPrueba $documento)
+    public function pdf(DocumentoPrueba $documento, bool $invitacion = false)
     {
-        abort_unless($documento->estado_procesamiento === 'completado' && $documento->ruta_pdf, 404);
-        $relative = $documento->ruta_pdf;
+        $relative = $invitacion ? $documento->ruta_invitacion : $documento->ruta_pdf;
+        abort_unless($documento->estado_procesamiento === 'completado' && $relative, 404);
+        $prefix = $invitacion ? 'invitaciones' : 'normalizados';
         $filename = basename($relative, '.pdf');
         abort_unless(Str::isUuid($documento->uuid) && Str::isUuid($filename)
-            && $relative === 'normalizados/'.$documento->uuid.'/'.$filename.'.pdf', 404);
+            && $relative === $prefix.'/'.$documento->uuid.'/'.$filename.'.pdf', 404);
         $disk = Storage::disk('documentos');
         $path = realpath($disk->path($relative));
         $root = realpath($disk->path(''));
         abort_unless($path && $root && str_starts_with($path, rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR) && is_file($path), 404);
-        abort_unless(filesize($path) === (int) $documento->tamano_pdf && hash_equals($documento->hash_pdf ?? '', hash_file('sha256', $path)), 409, 'El PDF no coincide con el resultado registrado.');
+        abort_unless(filesize($path) === (int) ($invitacion ? $documento->tamano_invitacion : $documento->tamano_pdf) && hash_equals(($invitacion ? $documento->hash_invitacion : $documento->hash_pdf) ?? '', hash_file('sha256', $path)), 409, 'El PDF no coincide con el resultado registrado.');
 
         return response()->file($path, ['Content-Type' => 'application/pdf', 'Cache-Control' => 'private, no-store',
             'Content-Disposition' => 'inline; filename="documento-'.$documento->uuid.'.pdf"',
             'X-Content-Type-Options' => 'nosniff', 'Content-Security-Policy' => "sandbox; default-src 'none'", 'X-Frame-Options' => 'SAMEORIGIN']);
+    }
+
+    public function invitacion(DocumentoPrueba $documento)
+    {
+        return $this->pdf($documento, true);
     }
 
     public function guardar(Request $request, DocumentoPrueba $documento)
@@ -112,5 +125,26 @@ class RevisionDocumentoController extends Controller
     {
         return $request->expectsJson() ? response()->json(['message' => $message], 409)
             : back()->withInput()->withErrors(['texto_referencia' => $message]);
+    }
+
+    private function origenes(DocumentoPrueba $documento): array
+    {
+        $components = array_values(array_filter($documento->componentes ?? [], fn ($part) => $part['tipo'] === 'documento'));
+        if (! $components) {
+            return [];
+        }
+        $singlePages = count($components) === $documento->numero_paginas;
+        $ranges = [];
+        $start = 1;
+        foreach ($components as $part) {
+            $count = $part['paginas'] ?? ($singlePages ? 1 : null);
+            if (! is_int($count) || $count < 1) {
+                return [];
+            }
+            $ranges[] = ['archivo' => $part['archivo'], 'nombre' => $part['nombre'], 'inicio' => $start, 'fin' => $start + $count - 1];
+            $start += $count;
+        }
+
+        return $start - 1 === $documento->numero_paginas ? $ranges : [];
     }
 }

@@ -25,7 +25,7 @@ class ProcesadorDocumental
             throw new ProcesamientoFallido('Falta configurar la clave local del procesador.');
         }
         $relative = 'originales/'.$documento->uuid.'.'.$documento->tipo_archivo;
-        if ($documento->ruta_privada !== $relative || ! in_array($documento->tipo_archivo, ['pdf', 'jpg', 'png'], true)) {
+        if ($documento->ruta_privada !== $relative || ! in_array($documento->tipo_archivo, ['pdf', 'jpg', 'png', 'zip'], true)) {
             throw new ProcesamientoFallido('La ubicación privada del documento no es válida.');
         }
         $disk = Storage::disk('documentos');
@@ -36,7 +36,7 @@ class ProcesadorDocumental
             || ! hash_equals($documento->hash_sha256, hash_file('sha256', $path))) {
             throw new ProcesamientoFallido('El archivo privado falta o no coincide con su hash registrado.');
         }
-        $mime = ['pdf' => 'application/pdf', 'jpg' => 'image/jpeg', 'png' => 'image/png'][$documento->tipo_archivo];
+        $mime = ['pdf' => 'application/pdf', 'jpg' => 'image/jpeg', 'png' => 'image/png', 'zip' => 'application/zip'][$documento->tipo_archivo];
         $stream = fopen($path, 'rb');
         try {
             $response = Http::withHeaders(['X-Processor-Token' => $token, 'Accept' => 'application/zip'])
@@ -45,7 +45,7 @@ class ProcesadorDocumental
                     if ($downloaded > config('documentos.max_response_bytes')) {
                         throw new ProcesamientoFallido('La respuesta del procesador supera el límite permitido.');
                     }
-                }])->withBody($stream, $mime)->post(rtrim($url, '/').'/procesar?modo='.rawurlencode($documento->modo_ocr).'&normalizar=true');
+                }])->withBody($stream, $mime)->post(rtrim($url, '/').'/procesar?modo='.rawurlencode($documento->modo_ocr).'&normalizar=true'.($documento->tipo_registro === 'invitacion' ? '&transcribir=false' : ''));
         } catch (ProcesamientoFallido $error) {
             throw $error;
         } catch (Throwable) {
@@ -81,6 +81,16 @@ class ProcesadorDocumental
         $package = app(PaqueteDigitalizado::class)->leer($response->body());
         $result = $this->validar($package['resultado']);
         $result['_pdf'] = $package['pdf'];
+        $result['_invitacion'] = $package['invitacion'] ?? null;
+        if (isset($result['componentes_paginas']) && count($result['componentes_paginas']) !== collect($documento->componentes)->where('tipo', 'documento')->count()) {
+            throw new ProcesamientoFallido('Las páginas no coinciden con los componentes recibidos.');
+        }
+        $omitted = collect($result['paginas'])->every(fn ($page) => $page['metodo'] === 'sin_transcripcion');
+        if ($omitted !== ($documento->tipo_registro === 'invitacion')
+            || ($documento->tipo_registro !== 'invitacion' && collect($result['paginas'])->contains(fn ($page) => $page['metodo'] === 'sin_transcripcion'))
+            || (bool) $documento->invitacion_nombre !== isset($result['_invitacion'])) {
+            throw new ProcesamientoFallido('El resultado no coincide con los componentes solicitados.');
+        }
 
         return $result;
     }
@@ -94,7 +104,10 @@ class ProcesadorDocumental
             'estado' => 'required|in:completado', 'numero_paginas' => 'required|integer|min:1|max:1000',
             'duracion_total_ms' => 'required|integer|min:0', 'texto_completo' => 'present|string',
             'paginas' => 'required|array|min:1|max:1000', 'paginas.*.numero' => 'required|integer|min:1',
-            'paginas.*.metodo' => 'required|in:digital,ocr', 'paginas.*.texto' => 'present|string',
+            'paginas.*.metodo' => 'required|in:digital,ocr,sin_transcripcion', 'paginas.*.texto' => 'present|string',
+            'invitacion_paginas' => 'nullable|integer|min:1|max:1000',
+            'componentes_paginas' => 'nullable|array|list|min:1|max:19',
+            'componentes_paginas.*' => 'required|integer|min:1|max:1000',
             'paginas.*.duracion_ms' => 'required|integer|min:0', 'paginas.*.observaciones' => 'present|array',
             'paginas.*.observaciones.*' => 'string', 'paginas.*.texto_digital' => 'nullable|string',
             'paginas.*.variantes_ocr' => 'present|array|max:2',
@@ -112,11 +125,17 @@ class ProcesadorDocumental
         if ($validator->fails() || count($data['paginas'] ?? []) !== ($data['numero_paginas'] ?? null)) {
             throw new ProcesamientoFallido('La respuesta del procesador tiene una estructura inválida.');
         }
+        if (isset($data['componentes_paginas']) && array_sum($data['componentes_paginas']) !== $data['numero_paginas']) {
+            throw new ProcesamientoFallido('La suma de páginas de los componentes no coincide con el documento.');
+        }
         foreach ($data['paginas'] as $index => $page) {
             if ($page['numero'] !== $index + 1 || ($page['metodo'] === 'ocr'
                 ? empty($page['variantes_ocr']) || $page['texto'] !== $page['variantes_ocr'][0]['texto']
                 : ! empty($page['variantes_ocr']))) {
                 throw new ProcesamientoFallido('La respuesta del procesador contiene páginas o variantes inconsistentes.');
+            }
+            if ($page['metodo'] === 'sin_transcripcion' && ($page['texto'] !== '' || ! empty($page['texto_digital']))) {
+                throw new ProcesamientoFallido('La invitación no debe contener texto extraído.');
             }
         }
         if ($data['texto_completo'] !== implode("\f", array_column($data['paginas'], 'texto'))) {

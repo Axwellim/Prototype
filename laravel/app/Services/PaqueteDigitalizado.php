@@ -20,7 +20,7 @@ class PaqueteDigitalizado
                 throw new ProcesamientoFallido('No se pudo guardar el paquete temporal completo.');
             }
             $opened = $zip->open(stream_get_meta_data($temporary)['uri']) === true;
-            if (! $opened || $zip->numFiles !== 2) {
+            if (! $opened || ! in_array($zip->numFiles, [2, 3], true)) {
                 throw new ProcesamientoFallido('El procesador no devolvió PDF y transcripción.');
             }
             foreach (['resultado.json' => 16777216, 'documento.pdf' => config('documentos.max_pdf_bytes')] as $name => $limit) {
@@ -36,7 +36,23 @@ class PaqueteDigitalizado
                 throw new ProcesamientoFallido('El PDF o la transcripción del resultado no es válido.');
             }
 
-            return ['resultado' => json_decode($json, true), 'pdf' => $pdf];
+            $data = json_decode($json, true);
+            $invitation = null;
+            if ($zip->numFiles === 3) {
+                $stat = $zip->statName('invitacion.pdf');
+                if (! $stat || $stat['size'] < 1 || $stat['size'] > config('documentos.max_pdf_bytes') || ($stat['encryption_method'] ?? 0) !== 0) {
+                    throw new ProcesamientoFallido('La invitación del paquete no es válida.');
+                }
+                $invitation = $zip->getFromName('invitacion.pdf');
+                if (! is_string($invitation) || ! str_starts_with($invitation, '%PDF-') || ! str_contains(substr($invitation, -2048), '%%EOF')) {
+                    throw new ProcesamientoFallido('El PDF de invitación no es válido.');
+                }
+            }
+            if (isset($data['invitacion_paginas']) !== ($invitation !== null)) {
+                throw new ProcesamientoFallido('El paquete no coincide con la invitación declarada.');
+            }
+
+            return ['resultado' => $data, 'pdf' => $pdf, 'invitacion' => $invitation];
         } finally {
             if ($opened) {
                 $zip->close();

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SubirDocumentoRequest;
 use App\Models\DocumentoPrueba;
+use App\Services\CargaCompuesta;
 use App\Services\ColaDocumental;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,26 +22,17 @@ class DocumentoController extends Controller
 
     public function store(SubirDocumentoRequest $request)
     {
-        $file = $request->file('archivo');
         $uuid = (string) Str::uuid();
-        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath());
-        $extension = ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png'][$mime];
-        $path = 'originales/'.$uuid.'.'.$extension;
         $disk = Storage::disk('documentos');
+        $path = null;
         try {
-            $hash = hash_file('sha256', $file->getRealPath());
-            $size = $file->getSize();
-            // Nunca se utiliza el nombre del navegador como ruta de almacenamiento.
-            $name = preg_replace('/[\x00-\x1F\x7F]/u', '', str_replace('\\', '/', $file->getClientOriginalName()));
-            $name = mb_substr(basename($name ?: 'documento.'.$extension), 0, 255);
-            $disk->putFileAs('originales', $file, $uuid.'.'.$extension);
-            $documento = DB::transaction(function () use ($uuid, $name, $extension, $size, $hash, $path) {
-                $documento = DocumentoPrueba::create([
-                    'uuid' => $uuid, 'nombre_original' => $name, 'tipo_archivo' => $extension,
-                    'tamano_bytes' => $size, 'hash_sha256' => $hash, 'ruta_privada' => $path,
-                    'numero_paginas' => $extension === 'pdf' ? null : 1,
-                    'estado_procesamiento' => 'pendiente', 'fecha_carga' => now(), 'modo_ocr' => 'automatico',
-                ]);
+            $attributes = app(CargaCompuesta::class)->guardar($request, $uuid);
+            $path = $attributes['ruta_privada'];
+            $documento = DB::transaction(function () use ($uuid, $attributes) {
+                $documento = DocumentoPrueba::create(array_merge($attributes, [
+                    'uuid' => $uuid, 'estado_procesamiento' => 'pendiente',
+                    'fecha_carga' => now(), 'modo_ocr' => 'automatico',
+                ]));
                 app(ColaDocumental::class)->encolar($documento);
 
                 return $documento;
@@ -48,7 +40,9 @@ class DocumentoController extends Controller
         } catch (Throwable $error) {
             // Solo se limpia el archivo nuevo si falló su registro; nunca archivos existentes.
             try {
-                $disk->delete($path);
+                if ($path) {
+                    $disk->delete($path);
+                }
             } catch (Throwable $cleanupError) {
                 report($cleanupError);
             }
@@ -97,7 +91,7 @@ class DocumentoController extends Controller
 
     private function estadoPublico(DocumentoPrueba $documento): array
     {
-        return ['uuid' => $documento->uuid, 'estado' => $documento->estado_procesamiento,
+        return ['sin_transcripcion' => $documento->tipo_registro === 'invitacion', 'uuid' => $documento->uuid, 'estado' => $documento->estado_procesamiento,
             'pdf_disponible' => $documento->estado_procesamiento === 'completado' && $documento->ruta_pdf !== null,
             'numero_paginas' => $documento->numero_paginas, 'metodos' => $documento->metodos_extraccion,
             'duracion_ms' => $documento->duracion_total_ms, 'error' => $documento->error_procesamiento,

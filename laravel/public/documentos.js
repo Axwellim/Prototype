@@ -1,50 +1,4 @@
-(() => {
-    const form = document.getElementById('upload-form');
-    if (!form) return;
-    const input = document.getElementById('archivo');
-    const zone = document.getElementById('dropzone');
-    const button = document.getElementById('upload-button');
-    const message = document.getElementById('upload-message');
-    const progress = document.getElementById('upload-progress');
-    for (const event of ['dragover', 'dragleave', 'drop']) zone.addEventListener(event, e => {
-        e.preventDefault();
-        zone.classList.toggle('dragging', event === 'dragover');
-        if (event === 'drop') {
-            if (e.dataTransfer.files.length !== 1) { message.textContent = 'Selecciona un solo documento por carga.'; return; }
-            input.files = e.dataTransfer.files;
-        }
-    });
-    form.addEventListener('submit', e => {
-        e.preventDefault();
-        if (!form.reportValidity()) return;
-        button.disabled = true;
-        progress.classList.remove('d-none');
-        progress.firstElementChild.style.width = '0%';
-        message.textContent = 'Enviando documento…';
-        const request = new XMLHttpRequest();
-        request.open('POST', form.action);
-        request.setRequestHeader('Accept', 'application/json');
-        request.timeout = 120000;
-        request.upload.onprogress = e => {
-            if (!e.lengthComputable) return;
-            const percent = Math.round(e.loaded / e.total * 100);
-            progress.setAttribute('aria-valuenow', percent);
-            progress.firstElementChild.style.width = percent + '%';
-            if (percent === 100) message.textContent = 'Validando y guardando el original…';
-        };
-        const fail = text => { message.textContent = text; button.disabled = false; };
-        request.onload = () => {
-            let data = {};
-            try { data = JSON.parse(request.responseText); } catch (_) {}
-            if (request.status === 201) { window.location.reload(); return; }
-            const detail = Object.values(data.errors || {}).flat().join(' ');
-            fail(detail || ({401:'La sesión terminó. Recarga la página e ingresa de nuevo.',419:'La sesión caducó. Recarga la página.',413:'El archivo supera el límite del servidor.',429:'Demasiados intentos. Espera un minuto.'}[request.status]) || data.message || 'No se pudo cargar el documento. Intenta nuevamente.');
-        };
-        request.onerror = () => fail('No hay conexión con el servidor. Comprueba el listado antes de reintentar.');
-        request.ontimeout = () => fail('El servidor tardó demasiado. Comprueba el listado antes de reintentar.');
-        request.send(new FormData(form));
-    });
-})();
+
 
 
 (() => {
@@ -76,7 +30,7 @@
                 badge.textContent = item.estado.charAt(0).toUpperCase() + item.estado.slice(1);
                 badge.className = 'badge ' + (colors[item.estado] || 'text-bg-secondary');
                 row.querySelector('[data-pages]').textContent = item.numero_paginas ?? 'Por determinar';
-                row.querySelector('[data-method]').textContent = item.metodos || 'Pendiente';
+                row.querySelector('[data-method]').textContent = item.sin_transcripcion ? 'Sin transcripción' : (item.metodos || 'Pendiente');
                 row.querySelector('[data-duration]').textContent = item.duracion_ms === null ? '' : (item.duracion_ms / 1000).toFixed(2) + ' s';
                 row.querySelector('[data-error]').textContent = item.error || '';
                 const retry = row.querySelector('[data-retry]');

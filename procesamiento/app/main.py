@@ -89,11 +89,15 @@ def create_app(settings: Settings) -> FastAPI:
         return {'estado': 'disponible', 'fase': 'extraccion_digital_y_ocr', 'ocr_habilitado': settings.ocr_enabled}
 
     @app.post('/procesar', response_model=ProcessingResult)
-    async def process(request: Request, modo: Literal['automatico', 'original', 'preprocesado', 'comparar'] | None = Query(default=None), normalizar: bool = False):
+    async def process(request: Request, modo: Literal['automatico', 'original', 'preprocesado', 'comparar'] | None = Query(default=None), normalizar: bool = False, transcribir: bool = True):
         mime = request.headers.get('content-type', '').split(';')[0].strip().lower()
-        if mime not in ('application/pdf', 'image/jpeg', 'image/png'):
+        if mime not in ('application/pdf', 'image/jpeg', 'image/png', 'application/zip'):
             raise HTTPException(415, detail='Envía bytes PDF, JPG o PNG con su Content-Type correspondiente.')
-        request_settings = settings.model_copy(update={'input_mime': mime, 'ocr_mode': modo or settings.ocr_mode, 'generate_pdf': normalizar})
+        if (mime == 'application/zip' or not transcribir) and not normalizar:
+            raise HTTPException(422, detail='La composición y las invitaciones requieren generar PDF.')
+        if mime == 'application/zip' and not transcribir:
+            raise HTTPException(422, detail='La invitación independiente debe ser un único PDF o imagen.')
+        request_settings = settings.model_copy(update={'input_mime': mime, 'ocr_mode': modo or settings.ocr_mode, 'generate_pdf': normalizar, 'transcribe': transcribir})
         if not busy.acquire(blocking=False):
             raise HTTPException(503, detail='El procesador está ocupado. Reintenta más tarde.', headers={'Retry-After': '5'})
         started = perf_counter()
@@ -137,6 +141,11 @@ def create_app(settings: Settings) -> FastAPI:
                     with zipfile.ZipFile(package, 'w', compression=zipfile.ZIP_STORED) as archive:
                         archive.writestr('resultado.json', result.model_dump_json())
                         archive.write(pdf, 'documento.pdf')
+                        if result.invitacion_paginas is not None:
+                            invitation = directory / 'invitacion.pdf'
+                            if not invitation.is_file() or invitation.stat().st_size > settings.max_pdf_bytes:
+                                raise HTTPException(500, detail='Falta el PDF de la invitación.')
+                            archive.write(invitation, 'invitacion.pdf')
                     return Response(content=package.getvalue(), media_type='application/zip')
                 return result
         except TimeoutError:

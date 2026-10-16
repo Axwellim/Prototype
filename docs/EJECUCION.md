@@ -1,5 +1,7 @@
 # Instalación y ejecución en Windows
 
+Ampliación de carga: [documentos compuestos e invitaciones](CARGA-COMPUESTA.md). La migración `000007` ya está aplicada en este equipo. Reiniciar Laravel, Python y el trabajador antes de usar el nuevo formulario.
+
 OCR v3: [distinción entre membrete y destinatario, y recuperación de iluminación](OCR-SIN-PLANTILLA.md). Reiniciar Python y el trabajador tras actualizar; no requiere migraciones adicionales.
 
 OCR actualizado para [oficios con membrete y sello](OCR-REGIONES.md): reiniciar Python y el trabajador después de actualizar; no requiere otra migración.

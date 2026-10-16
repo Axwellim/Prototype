@@ -18,6 +18,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/documentos/{documento}/reintentar', [DocumentoController::class, 'reintentar'])->middleware('throttle:20,1')->name('documentos.reintentar');
     Route::get('/documentos/{documento}/revision', [RevisionDocumentoController::class, 'show'])->name('documentos.revision');
     Route::get('/documentos/{documento}/original', [RevisionDocumentoController::class, 'original'])->name('documentos.original');
+    Route::get('/documentos/{documento}/invitacion', [RevisionDocumentoController::class, 'invitacion'])->name('documentos.invitacion');
     Route::get('/documentos/{documento}/pdf', [RevisionDocumentoController::class, 'pdf'])->name('documentos.pdf');
     Route::get('/documentos/{documento}/texto', [RevisionDocumentoController::class, 'texto'])->name('documentos.texto');
     Route::post('/documentos/{documento}/referencia', [RevisionDocumentoController::class, 'guardar'])->middleware('throttle:60,1')->name('documentos.referencia');

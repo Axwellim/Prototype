@@ -1,33 +1,24 @@
 @extends('layout')
 @section('title', 'Revisión documental')
 @section('content')
-<a href="{{ route('documentos.index') }}" class="text-decoration-none small">← Volver a documentos</a>
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mt-3 mb-4">
-    <div class="review-heading"><span class="eyebrow">REVISIÓN DOCUMENTAL</span><h1 class="h3 mt-2 mb-1">{{ $documento->nombre_original }}</h1><p class="small text-secondary mb-0">{{ $documento->uuid }}</p></div>
+@if ($documento->invitacion_nombre)<p><a class="btn btn-outline-secondary" href="{{ route('documentos.invitacion', $documento) }}" target="_blank" rel="noopener">Ver invitación adjunta: {{ $documento->invitacion_nombre }} (sin transcripción)</a></p>@endif
+<div class="d-flex flex-wrap align-items-center justify-content-end gap-3 mb-4">
     <div class="d-flex gap-2 flex-wrap">@if ($documento->ruta_pdf)<a href="{{ route('documentos.pdf', $documento) }}" target="_blank" rel="noopener" class="btn btn-outline-primary">Abrir PDF digitalizado</a>@endif<a href="{{ route('documentos.texto', $documento) }}" class="btn btn-outline-secondary">Ver texto completo</a></div>
 </div>
-<nav class="card border-0 shadow-sm p-3 mb-4 d-flex flex-row flex-wrap align-items-center justify-content-between gap-3" aria-label="Páginas del documento">
-    <div class="d-flex align-items-center gap-2">
-        @if ($numero > 1)<a class="btn btn-sm btn-outline-secondary" id="previous-page" href="{{ route('documentos.revision', ['documento'=>$documento, 'pagina'=>$numero-1]) }}">← Anterior</a>@else<span class="btn btn-sm btn-outline-secondary disabled" aria-disabled="true">← Anterior</span>@endif
-        <strong class="small" id="page-label">Página {{ $numero }} de {{ $documento->numero_paginas }}</strong>
-        @if ($numero < $documento->numero_paginas)<a class="btn btn-sm btn-outline-secondary" id="next-page" href="{{ route('documentos.revision', ['documento'=>$documento, 'pagina'=>$numero+1]) }}">Siguiente →</a>@else<span class="btn btn-sm btn-outline-secondary disabled" aria-disabled="true">Siguiente →</span>@endif
-    </div>
-    <form method="get" class="d-flex align-items-center gap-2">
-        <label class="small" for="pagina">Ir a página</label><input type="number" id="pagina" name="pagina" min="1" max="{{ $documento->numero_paginas }}" value="{{ $numero }}" class="form-control form-control-sm page-input" required><button class="btn btn-sm btn-outline-secondary">Ir</button>
-    </form>
-</nav>
+
 <div class="row g-4 review-grid">
-    <section class="col-12 col-xl-6" aria-labelledby="original-heading">
+    <section class="col-12 col-xl-6" aria-label="Vista previa del documento">
         <div class="card border-0 shadow-sm overflow-hidden">
             <div class="p-3 border-bottom d-flex align-items-center justify-content-between gap-2 flex-wrap">
-                <h2 class="h6 mb-0" id="original-heading">Documento original</h2>
+                <form id="preview-page-form" method="get" class="d-flex align-items-center gap-2">
+        <label class="small" for="pagina">Ir a página</label><input type="number" id="pagina" name="pagina" min="1" max="{{ $documento->numero_paginas }}" value="{{ $numero }}" class="form-control form-control-sm page-input" required><button class="btn btn-sm btn-outline-secondary">Ir</button>
+    </form>
                 <div class="d-flex align-items-center gap-2"><button type="button" id="zoom-out" class="btn btn-sm btn-outline-secondary" aria-label="Reducir zoom" disabled>−</button><output id="zoom-label" class="small">100 %</output><button type="button" id="zoom-in" class="btn btn-sm btn-outline-secondary" aria-label="Aumentar zoom" disabled>+</button><button type="button" id="zoom-fit" class="btn btn-sm btn-outline-secondary" disabled>Ajustar</button></div>
             </div>
             <p id="preview-status" class="small text-secondary px-3 pt-3 mb-2" role="status">Cargando vista previa…</p>
             <div class="preview-scroll" id="preview-container" aria-label="Vista previa de la página {{ $numero }}">
-                @if ($documento->tipo_archivo !== 'pdf')<img id="original-image" src="{{ route('documentos.original', $documento) }}" alt="Original de {{ $documento->nombre_original }}" class="original-image">@else<div id="pdf-surface"></div>@endif
+                @if (! in_array($documento->tipo_archivo, ['pdf', 'zip'], true))<img id="original-image" src="{{ route('documentos.original', $documento) }}" alt="Original de {{ $documento->nombre_original }}" class="original-image">@else<div id="pdf-surface"></div>@endif
             </div>
-            <div class="p-3 border-top small"><a href="{{ route('documentos.original', $documento) }}" target="_blank" rel="noopener">Abrir original en otra pestaña</a><noscript><p class="mt-2 mb-0">Activa JavaScript para ver el PDF aquí y utilizar el zoom.</p></noscript></div>
         </div>
     </section>
     <section class="col-12 col-xl-6" aria-labelledby="extraction-heading">
@@ -40,7 +31,8 @@
             @if (($pagina->variantes_ocr[0]['alcance'] ?? '') === 'contenido_principal')
                 <p class="small text-secondary">Se muestra el contenido principal del oficio. Revisa las zonas omitidas en el OCR completo; número, fecha, destinatario y asunto deben conservarse.</p>
             @endif
-            <label class="visually-hidden" for="extracted-text">Texto extraído de la página {{ $numero }}</label><textarea id="extracted-text" class="form-control extracted-text" rows="10" readonly>{{ $pagina->texto_extraido }}</textarea>
+            <p class="small text-secondary">Se muestra el texto de todas las páginas, en orden. La referencia editable corresponde a la página {{ $numero }}.</p>
+            <label class="visually-hidden" for="extracted-text">Texto completo del documento</label><textarea id="extracted-text" class="form-control extracted-text" rows="14" readonly>@foreach ($textos as $item){{ count($textos) > 1 ? 'Página '.$item['numero']."\n\n" : '' }}{{ $item['texto'] }}{{ !$loop->last ? "\n\n" : '' }}@endforeach</textarea>
             @if (! trim($pagina->texto_extraido))<p class="small text-warning-emphasis mt-2 mb-0">No se reconoció texto. Revisa visualmente el original.</p>@endif
             @if ($pagina->observaciones)<details class="mt-3 small"><summary>Observaciones del procesamiento</summary><pre class="text-block mt-2">{{ $pagina->observaciones }}</pre></details>@endif
             @foreach ($pagina->variantes_ocr ?? [] as $variante)
@@ -60,7 +52,7 @@
             <h2 class="h5">Transcripción de referencia</h2><p class="small text-secondary">Revisa el original e introduce una transcripción corregida. Se guarda por separado del texto automático.</p>
             <form method="post" action="{{ route('documentos.referencia', $documento) }}" id="reference-form">
                 @csrf<input type="hidden" name="numero_pagina" value="{{ $numero }}"><input type="hidden" name="revision" id="reference-revision" value="{{ old('revision', $referencia?->id) }}">
-                <button type="button" id="copy-draft" class="btn btn-sm btn-outline-secondary mb-3" disabled>Copiar resultado como borrador</button>
+                <button type="button" id="copy-draft" class="btn btn-sm btn-outline-secondary mb-3" disabled>Copiar página {{ $numero }} como borrador</button>
                 <label class="visually-hidden" for="reference-text">Transcripción corregida de la página {{ $numero }}</label><textarea class="form-control mb-3" id="reference-text" name="texto_referencia" rows="12" maxlength="{{ config('documentos.max_reference_chars') }}" required>{{ old('texto_referencia', $referencia?->texto_referencia) }}</textarea>
                 <label class="form-label small" for="reference-notes">Observaciones de revisión (opcional)</label><textarea class="form-control mb-3" id="reference-notes" name="observaciones" rows="2" maxlength="10000">{{ old('observaciones', $referencia?->observaciones) }}</textarea>
                 <div class="d-flex flex-wrap gap-3 align-items-center"><button class="btn btn-primary" id="save-reference">Guardar transcripción de referencia</button><span class="small text-secondary" id="draft-state" role="status"></span></div>

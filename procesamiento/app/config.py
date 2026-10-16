@@ -16,8 +16,9 @@ class Settings(BaseModel):
     refinement_tessdata_dir: str = ''
     ocr_mode: Literal['automatico', 'original', 'preprocesado', 'comparar'] = 'automatico'
     generate_pdf: bool = False
+    transcribe: bool = True
     max_pdf_bytes: int = Field(default=40 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
-    input_mime: Literal['application/pdf', 'image/jpeg', 'image/png'] = 'application/pdf'
+    input_mime: Literal['application/pdf', 'image/jpeg', 'image/png', 'application/zip'] = 'application/pdf'
     ocr_timeout_seconds: int = Field(default=40, ge=1, le=120)
     render_dpi: int = Field(default=250, ge=100, le=400)
     max_image_pixels: int = Field(default=12000000, ge=10000, le=25000000)

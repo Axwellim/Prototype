@@ -1,6 +1,8 @@
 # Gestión documental — GAD Parroquial Rural de Imantag
 
-Versión **1.0.0**: [alcance y notas de la versión](docs/VERSION-1.0.md).
+Versión **1.1.0**: [alcance y notas de la versión](docs/VERSION-1.1.md). [Versión anterior: 1.0.0](docs/VERSION-1.0.md).
+
+Nueva carga: [documentos compuestos e invitaciones sin transcripción](docs/CARGA-COMPUESTA.md).
 
 Oficios de varias páginas: [continuaciones sin membrete ni pie decorativo](docs/OFICIOS-MULTIPAGINA.md).
 

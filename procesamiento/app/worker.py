@@ -6,14 +6,20 @@ import sys
 from .config import Settings
 from .extraction import DocumentError, extract_document
 from .normalization import normalize_pdf
+from .composition import process_composition, archive_invitation
 
 
 def main():
     source, target, config_path = map(Path, sys.argv[1:4])
     settings = Settings.model_validate_json(config_path.read_text(encoding='utf-8'))
     try:
-        extracted = extract_document(source, settings)
-        if settings.generate_pdf:
+        if settings.input_mime == 'application/zip':
+            extracted = process_composition(source, target.parent, settings)
+        elif not settings.transcribe:
+            extracted = archive_invitation(source, target.parent / 'normalizado.pdf', settings)
+        else:
+            extracted = extract_document(source, settings)
+        if settings.generate_pdf and settings.transcribe and settings.input_mime != 'application/zip':
             normalize_pdf(source, target.parent / 'normalizado.pdf', settings, extracted.numero_paginas)
         result = {'ok': True, 'resultado': extracted.model_dump()}
     except DocumentError as error:
